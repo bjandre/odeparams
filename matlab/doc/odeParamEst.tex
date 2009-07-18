@@ -1,0 +1,411 @@
+% 
+% $Id: odeParamEst.tex 5 2008-11-18 04:11:57Z bjandre $
+% 
+% Notes describing the ode parameter estimator.
+% 
+% ----------------------------------------------------------------------
+
+\documentclass[10pt]{article}
+\usepackage{graphicx} 	% extended graphics package
+\usepackage{amsmath} 	% math package
+\usepackage{array} 	% extended styles for tables
+\usepackage{hhline} 	% extended styles for tables
+\usepackage{pslatex}    % so that we've got a clean pdf file afterwards
+\usepackage{theorem} 	% mathematical stuff
+
+\theoremheaderfont{\scshape}
+\theoremstyle{plain}
+\theorembodyfont{\upshape}
+\newtheorem{theo}{Theorem}
+
+% ----------------------------------------------------------------------
+
+% Version Control Information
+\newcommand{\cvsstamp}{$\ $Id: odeParamEst.tex 5 2008-11-18 04:11:57Z bjandre $\ $ }
+
+% ----------------------------------------------------------------------
+
+\author{Benjamin Andre\\
+  \makeatletter \texttt{benjamin.andre@colorado.edu} }
+
+% ----------------------------------------------------------------------
+
+\title{\textbf{ODE parameter estimator}}
+\date{
+  {\small \cvsstamp}}
+
+% ----------------------------------------------------------------------
+
+\setlength{\textheight}{8.50in}
+\setlength{\textwidth}{6.8in}
+\setlength{\topmargin}{0.25in}
+\setlength{\headheight}{0.0in}
+\setlength{\headsep}{0.60in}
+\setlength{\oddsidemargin}{-.19in}
+\setlength{\parindent}{1pc}
+
+% ----------------------------------------------------------------------
+
+\begin{document}
+\markright{OPE}
+\maketitle
+\pagestyle{myheadings}
+
+\begin{center}
+Copyright 2007, 2008 Benjamin Andre
+
+This work is licensed under the Creative Commons Attribution-Share
+Alike 3.0 United States License. To view a copy of this license, visit
+http://creativecommons.org/licenses/by-sa/3.0/us/ or send a letter to
+Creative Commons, 171 Second Street, Suite 300, San Francisco,
+California, 94105, USA.
+\end{center}
+
+\textbf{This software and document are still a draft...  Use at your own risk.}
+
+\section{Introduction}
+The purpose of this software is to help estimate the parameters
+($\vec{p}$) of a system of nonlinear ODEs and initial conditions
+\begin{equation}
+\frac{d\vec{y}}{dt} = f(t, \vec{y}, \vec{p})
+\end{equation}
+\begin{equation}
+\vec{y}(t_0)=\vec{c} 
+\end{equation}
+by fitting them to integrated experimental data ($\vec{y_e}$)
+\begin{equation}
+\vec{y_e}(t_0), \vec{y_e}(t_1), ... , \vec{y_e}(t_N)
+\end{equation}
+using the built-in Matlab functions ode45 and lsqnonlin. The basic
+algorithm is: use an estimate of the parameters to numerically
+integrate the ode over the range of the independent variable found in
+the data. The dependent variables are saved at times corresponding to
+the experimental data. Nonlinear least squares regression is used to
+refine the estimate of the parameters.
+
+Numerical models, regression etc are only a tool. Don't blindly trust
+the results of this model. Use additional knowledge about your
+experiment or field that may not be captured in the data/model to
+judge the quality of the fit.
+
+\section{Use}
+\subsection{Requirements}
+\begin{itemize}
+\item access to a computer running Matlab v. 2007a or later with optimization toolbox?.
+\item some\_name.csv : input data
+\item some\_ode\_function.m : function to evaluate the ode.
+\item some\_driver.m : driver routine
+\end{itemize}
+
+\subsection{Data File}
+The integrated data points are supplied in a csv file (comma separated
+values), exported from a spreadsheet or created by hand. The
+delimiters must be commas. There can be no comments, column headings,
+etc in the file. The columns are:
+
+1 : independent variable, time, etc
+
+2 : dependent variable 1 data
+
+3 : dependent variable 1 weighting
+
+4, 5, ... N, N+1 : additional columns alternating data and weighting,....
+
+After the data and weighting, the user is allowed to supply additional
+columns which are stored and passed into the ode function (via the
+``userData'' variable). See the pyrite example getvolume.m for details
+about how this may be used.
+
+
+\subsection{ODE function}
+The ode function is the same as described by the Matlab ode solver
+documentation. It should take two input variables, the current
+independent variable and a vector of dependent variables. It returns a
+single vector of xdot data. An example ode function would be saved in
+exODEfunc.m:
+\begin{verbatim}
+function xdot=exODEfunc(t,x)
+global OPEuser
+
+% params(1) = some constant
+% params(2) = some other constant
+a = OPEuser.params(1);
+b = OPEuser.params(2);
+xdot = zeros(2,1);
+xdot(1) = b - a * x(1) * x(2));
+xdot(2) = b * x(2);
+\end{verbatim}
+
+The ode function file should have a single global variable,
+"OPEuser". OPEuser is a structure supplied by the odeParamEst routine
+that provides the following fields:
+
+\begin{itemize}
+\item OPEuser.params : the current estimate of the parameters
+\item OPEuser.time independent variable data supplied by the user
+\item OPEuser.expData : a copy of the experimental data is available if needed
+\item OPEuser.userData : user time series data extracted from the data file
+\item OPEuser.userParams : user defined parameters. passed through
+from the driver routine (OPEinput) unmodified.
+\end{itemize}
+
+Do not modify the params, time or expData fields inside the ode function!
+
+\subsection{Driver routine}
+The drive routine sets up the problem, calls ``odeParamEst'' to fit
+the parameters then plots and saves the results. Setup consists of
+specifying the path to the data file, the function handle, the number
+of dependent variables in the datafile/ode and the initial guess for
+the parameters. An example driver routine is:
+
+\begin{verbatim}
+odeOptions = odeset('Stats','on');
+odeOptions = odeset(odeOptions,'MaxStep',50);
+
+% fill the ode parameter estimator input data structure
+OPEinput.numEqns = 2;
+OPEinput.odeFunc = @exODEfunc;
+OPEinput.dataFile = 'exData.cvs';
+OPEinput.initialParams = [-0.4; 10^-6.07];
+OPEinput.odeOptions = odeOptions;
+OPEinput.verifyODE = true;
+
+[params, time, plotData] = odeParamEst(OPEinput);
+% plot or save data...
+\end{verbatim}
+
+odeParamEst requires one input variable containing the user data. The
+user passes data from the driver program into the parameter estimator
+by using a data structure called "OPEinput". The parameter estimator
+passes data to the user ode function using the "OPEuser" data
+structure described above. The OPEinput structure may be modified
+internally by odeParamEst routine and should not be accessed by the
+user in the ode function routine (so don't make it global and try to
+use it).
+
+\subsubsection{OPEinput: required fields}
+\begin{itemize}
+\item OPEinput.dataFile : the path to the data file (described above).
+
+\item OPEinput.numEqns : the number of dependent variables in the system of equations
+
+\item OPEinput.odeFunc : the user defined ode function (described above)
+
+\item OPEinput.initialParams : a meaningful initial guess for the
+parameters. All zeros or ones is not a meaningful guess. the order
+of the parameters here is the same as in the ode function, so make
+sure you are consistent.
+
+\end{itemize}
+
+\subsubsection{OPEinput: optional fields}
+The following fields in OPEinput are optional fields that will be
+assigned a default value if not specified.
+
+\begin{itemize}
+\item OPEinput.initialConditions : must have the same number of unknowns as
+the data (without weights). Default uses the first row of the data
+
+\item OPEinput.odeOptions : matlab data created by the odeset()
+function containing any options you want to pass to the ode
+solver, i.e. setting the maximum step size, tolerances, etc. Before you
+start messing with the default variables, make sure your ode function
+is correct and the initial guess for the parameters is meaningful. see
+Matlab help for ode45 or odeset for details. By default, stats are
+turned on.
+
+\item OPEinput.minFunc : the minimization function used by lsqnonlin. 
+If the user does not specify a function, the default is the function
+odeParamEstLSQ.m, which performs a weighted residuals
+calculation. Creating your own function is the only way there is
+currently to use a different ode solver. This is a slightly more
+advanced option and should only be used if the default is not working
+for you or you know what you are doing.
+
+\end{itemize}
+
+The following fields are optional and are ignored if not specified by the user.
+\begin{itemize}
+\item OPEinput.lowerBounds and OPEinput.upperBounds : these specify upper 
+and lower bounds to the parameters (i.e. non negative, etc). If one is
+defined, then both must be defined, and their size must match the size
+of OPEinput.initialParams.
+
+\item OPEinput.minOptions : options to pass the minimization solver lsqnonlin. 
+This is only available if upper and lower bounds are specified. See
+Matlab lsqnonlin documentation for details.
+ 
+\item OPEinput.userParams : user specified parameters. can be a vector, 
+structure, etc. It is copied to OPEuser.userParams unmodified. 
+
+\item OPEinput.verifyODE : true or false, flag that asks odeParamEst 
+to plot the ode function over the data range specified in the input
+file, using the initial parameter guess. This allows the user to
+verify that the ode function is correct and that the initial
+parameters are valid. It is highly recommend that you use this while
+developing and debugging your code!
+
+\end{itemize}
+
+\subsubsection{Return values}
+The odeParamEst function
+returns three variables,
+\begin{itemize}
+\item params : the final parameter estimates, in the order used by the ode
+function.
+\item time : the time (independent variable) column data extracted from the
+data file
+\item plotData : input data and resulting fit, (d1, f1, d2, f2, etc) it a
+way that can easily be plotted.
+\end{itemize}
+
+
+\subsection{comparison plot}
+description of example plot function....
+
+
+\section{Usage help and tips}
+\begin{itemize}
+\item 
+Checked the user defined functions to make sure they are behaving
+correctly. Most of the problems you will encounter getting the solver
+working and getting meaningful results are because of an ODE function
+that isn't doing what you think it is. Try plotting the ode function
+with a known set of parameters (it is easy with ``OPEinput.verifyODE =
+true'')? 
+
+\item
+Did you check the ode function? Don't you think you should try that?
+Why don't you do it now, I'll wait. I don't care if you think you've
+done it already, do it again. No seriously, do it.
+  
+\item Are you using a meaningful set on initial conditions?
+i.e. does your data have a noisy initial data point? This is an IVP,
+if you don't have a good starting point, it won't work.
+
+\item Are you using a meaningful set of initial parameter values? 
+
+\item did you check your units? Are you sure?
+
+\item This code is solving an unconstrained minimization
+problem. That means it can choose any value for the parameters. Does
+your ode function have special needs, i.e. no negative values? If so,
+pass upper and lower parameter bounds to the solver.
+
+\item Is the system of ODEs stiff or singular? Try reading the matlab
+ode solver documentation and changing the parameters with odeset() or
+changing the ode solver in odeParamEstLSQ.m.
+
+\item Is there something about the problem that will make it hard to 
+solve correctly? For example: a very long time domain where very
+important, very short events occur at irregular intervals? (See the
+pyrite example.) You may need to adjust the ode options, etc.
+
+\item Beware of local minima! Once you get an estimate of the parameters,
+try several different initial guesses.
+
+\end{itemize}
+
+\section{Examples}
+
+\subsection{Kinetics $Fe^{+2}$ oxidation by iron oxidizing bacteria}
+Note: single ode, very clean data set two very similar data sets give
+different parameter estimates.
+
+Assume that the oxidation of aqueous $Fe^{+2}$ by iron oxidizing
+bacteria (IOB) can be describe by a single ODE describing the
+substrate depletion. IOB are cultured in a shaken flask with aqueous
+substrate, and iron samples are analyzed approximately every
+hour. Initial and final biomass can be determined.
+
+\subsubsection{Equations}
+\begin{equation}
+\frac{dS}{dt} = -\mu_{max} S \frac{(\frac{X_0}{Y} + S_0 - S)}{K_s + S}
+\end{equation} 
+where S is the substrate ($Fe^{+2}$) concentration, (mg/L),
+$\mu_{max}$ is the maximum specific growth rate, (hours), $X_0$ is the
+initial biomass concentration (mg cells / L), Y is the cell yield (mg
+cell / mg substrate), $K_s$ is the half saturation constant
+(mg/L). Note that it is not possible to get separate estimates of
+$X_0$ and $Y$ from this equation. The parameters being solved for are:
+params(1) = $\mu_{max}$, params(2) = $K_s$, params(3) =
+$\frac{X_0}{Y}$. The estimates of $\mu_max$ and $K_s$ are not
+independent, and you generally can not get a meaningful estimate of
+$K_s$ from this data with this equation.
+
+\subsubsection{Description of data columns}.
+\begin{enumerate}
+\item time (hours)
+\item $[Fe^{+2}]$ (mg/L)
+\item weighting for $[Fe^{+2}]$ data
+\end{enumerate}
+
+
+\subsection{Pyrite oxidation by $Fe^{+3}$}
+Note: two ode's, three parameters, one bad data point, requires user
+defined parameters and time series data. Compare the inhibition and
+inhibition models, least squares regression can't tell you if one is
+better than the other, but additional domain knowledge shows that
+inhibition does occur.
+
+\subsubsection{Equations} 
+\begin{equation}
+r_{Fe2} = \frac{15}{14}k[Fe^{+2}]^a[Fe^{+3}]^b 
+\end{equation}
+\begin{equation}
+r_{Fe3} = -k[Fe^{+2}]^a[Fe^{+3}]^b
+\end{equation}
+
+\subsubsection{Explanation of data}
+\begin{enumerate}
+\item time seconds
+\item $Fe^{+2}$ moles
+\item weighting for $Fe^{+2}$ data
+\item $Fe^{+3}$ moles
+\item weighting for $Fe^{+3}$ data
+\item volume (ml)
+\item delta volume (ml)
+\end{enumerate}
+
+\subsection{T. Thioparus growth on sodium thiosulfate}
+Note: limited data, missing data point, two models, does cell death
+give a better fit to the data?
+\subsubsection{Equations}
+\begin{equation}
+\frac{dS}{dt} = -\frac{\mu_{max}}{Y} X \frac{S}{K_s + S}
+\end{equation}
+\begin{equation}
+\frac{dX}{dt} = \mu_{max} X \frac{S}{K_s + S}
+\end{equation}
+
+or taking cell death into account:
+
+\begin{equation}
+\frac{dX}{dt} = \mu_{max} X \frac{S}{K_s + S} - b
+\end{equation}
+where $\mu_{max}$ is the maximum specific growth rate
+Ks is substrate half saturation constant
+Y is yield 
+b is ?
+
+\subsubsection{Explanation of data}
+\begin{enumerate}
+\item time hours
+\item X = biomass (Thiobacillus Thioparus) (mg/L)
+\item weighting for X
+\item S = substrate (sodium thiosulfate) (mg/L)
+\item weighting for S
+\item pH
+\end{enumerate}
+
+\subsection{Runoff}
+Note: observed data is a function of the state variables
+
+
+
+%\bibliographystyle{plain}
+%\bibliography{ope}
+
+
+\end{document}
+% ___END___
